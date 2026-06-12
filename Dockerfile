@@ -179,8 +179,6 @@ RUN mkdir -p /opt/claude \
     && cp -rL /root/.local/share/claude/* /opt/claude/ 2>/dev/null || true \
     && rm -f /usr/local/bin/claude \
     && ln -sf /opt/claude/versions/$(ls /opt/claude/versions/ | head -1) /usr/local/bin/claude \
-    && mkdir -p /home/dev/.local/bin \
-    && ln -sf /usr/local/bin/claude /home/dev/.local/bin/claude \
     && chmod -R a+rX /opt/claude \
     # Cursor CLI: instala como "agent" em /root/.local/share/cursor-agent/
     && mkdir -p /opt/cursor-agent \
@@ -254,6 +252,7 @@ LABEL org.opencontainers.image.created="${AI_WORKSPACE_BUILD_DATE}"
 # ══════════════════════════════════════════════════════════════
 
 ENV PATH="/home/dev/bin:/home/dev/.local/bin:/usr/local/bin:/usr/local/go/bin:${PATH}"
+ENV DISABLE_AUTOUPDATER=1
 ENV LIGHTPANDA_DISABLE_TELEMETRY=true
 ENV RUSTUP_HOME="/root/.rustup"
 ENV CARGO_HOME="/home/dev/.cargo"
