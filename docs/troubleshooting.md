@@ -21,7 +21,7 @@ docker logs $(docker ps -q -f name=aiworkspace) 2>&1 | tail -20
 docker exec $(docker ps -q -f name=aiworkspace) whoami
 # Esperado: root (o entrypoint roda como root, mas dropa pra dev)
 
-# Sessões tmux ativas
+# Sessões Herdr ativas
 ai-sessions
 
 # Versão da imagem
@@ -282,7 +282,7 @@ Se o resultado for `/home/dev/projects/projeto-a` mas você esperava `projeto-b`
    ai-dev projeto-b
    ```
 
-> **Por quê isso acontece?** O `ai-dev` cria a sessão tmux com `cd ~/projects/<projeto>` e lança a CLI nesse diretório. Mas se a sessão já existe (reconexão), ele apenas faz attach — não reinicia as CLIs. O working directory fica travado no que era quando a CLI iniciou.
+> **Por quê isso acontece?** O `ai-dev` cria a sessão Herdr em `~/projects/<projeto>` e lança a CLI nesse diretório. Mas se a sessão já existe (reconexão), ele apenas faz attach — não reinicia as CLIs. O working directory fica travado no que era quando a CLI iniciou.
 
 ---
 
@@ -304,7 +304,7 @@ docker service ps aiworkspace_aiworkspace
 - Entrypoint com erro de sintaxe (o container morre imediatamente)
 - OOM kill (memória insuficiente — verifique os limites no yaml)
 
-### Sintoma: Sessão tmux "main" sumiu
+### Sintoma: Sessão Herdr "main" sumiu
 
 **Causa**: O container pode ter reiniciado. A sessão "main" é criada pelo entrypoint no boot.
 
@@ -312,7 +312,7 @@ docker service ps aiworkspace_aiworkspace
 
 ```bash
 # Ver se existe
-docker exec -u dev $(docker ps -q -f name=aiworkspace) tmux ls
+docker exec -u dev $(docker ps -q -f name=aiworkspace) herdr session list
 ```
 
 **Solução**: Se não existir, o container provavelmente reiniciou. Verifique os logs. As sessões de projeto (`ai-dev`) são independentes da "main".

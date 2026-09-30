@@ -7,7 +7,7 @@ SECTIONS[comandos]='
   Comando                    Onde   Descrição
   ────────────────────────── ────── ────────────────────────────────────
   ai-enter                   H      Shell zsh dentro do container
-  ai-attach                  H      Anexa ao tmux principal (sessão "main")
+  ai-attach                  H      Anexa ao Herdr principal (sessão "main")
   ai-update [imagem]         H      Pull + force update do serviço Swarm
                                     (AI_WORKSPACE_SERVICE override do nome)
   ai-version                 H      Mostra versão da imagem em execução + boot log
@@ -19,10 +19,10 @@ SECTIONS[comandos]='
   ai-browser [porta|status|stop] C  Chromium headless com CDP (default porta 9222)
   ai-help [seção]            H/C    Esta ajuda (seções: comandos flags danger setup docs)
 
-  ai-dev <projeto> [flags]   H/C    Cria/reconecta workspace tmux do projeto
+  ai-dev <projeto> [flags]   H/C    Cria/reconecta sessão Herdr do projeto
   ai-dev-danger <projeto>    H/C    Atalho: ai-dev <projeto> --danger
-  ai-sessions                H/C    Lista sessões tmux + processos + recursos
-  ai-kill <projeto>          H/C    Mata uma sessão tmux específica
+  ai-sessions                H/C    Lista sessões Herdr + processos + recursos
+  ai-kill <projeto>          H/C    Mata uma sessão Herdr específica
   ai-kill-all                H/C    Mata TODAS as sessões (preserva "main")
   ai-delete <projeto>        H/C    Mata sessão + APAGA pasta do projeto
 

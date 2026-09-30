@@ -7,8 +7,8 @@
 export PATH="$HOME/bin:$HOME/.local/bin:$PATH"
 
 # Aliases - workspace
-alias tls='tmux ls'
-alias ta='tmux attach -t'
+alias tls='herdr session list'
+alias ta='herdr session attach'
 
 # Aliases - ferramentas
 alias cc='claude'

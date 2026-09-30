@@ -4,6 +4,101 @@ Setup containerizado de **8 AI coding agents** no Docker Swarm, com persistênci
 
 **Agents**: Claude Code, Gemini CLI, Qwen Code, Cursor CLI, OpenCode CLI, Codex CLI, Cline CLI, Aider
 
+## Destino OS Agenda em preparação
+
+Em 30/09/2026, o destino é `root@207.180.3.209` (`srv-2j3lui`), em Swarm
+independente das origens. A origem `5.189.165.36` permanece disponível até o
+usuário validar o acesso pelo PC e pela IDE. Esta seção e
+[`aiworkspace-target.yaml`](aiworkspace-target.yaml) definem o destino; o guia
+genérico abaixo descreve a instalação com volumes separados e rede compartilhada.
+
+| Contrato | Destino |
+|---|---|
+| Imagem local | `aiworkspace-herdr:migration-20260930` |
+| Persistência | Volume externo `aiworkspace_home` em todo `/home/dev` |
+| Multiplexador | Herdr `0.9.1`, exclusivo |
+| Limites | 8 CPUs e `32G` de RAM |
+| Reservas | 1 CPU e `2G` de RAM |
+| Rede | Overlay própria do workspace |
+| SSH do container | Porta 2222, acessível pelo loopback do host |
+
+A imagem foi derivada da base pré-copiada com conteúdo conferido, preservando
+as versões das CLIs. O volume completo conserva projetos, configurações,
+histórico, autenticação e chaves SSH, inclusive arquivos fora dos antigos mounts.
+Preservar UID/GID e permissões; backups do home contêm credenciais e devem
+permanecer restritos, fora do repositório. Processos e PTYs da origem não migram
+com o volume; as sessões de agentes serão iniciadas no Herdr do destino.
+
+No destino confirmado, o deploy usa a imagem já presente no nó, com o home
+restaurado e a label `aiworkspace=true`:
+
+```sh
+AI_WORKSPACE_IMAGE=aiworkspace-herdr:migration-20260930 \
+  docker stack deploy --resolve-image never -c aiworkspace-target.yaml aiworkspace
+```
+
+`ai-update` sem argumento reaplica a imagem atual do serviço. Para trocar de
+versão, informar uma imagem explícita; se ela já estiver no nó, não há pull.
+Antes de atualizar o serviço, o helper verifica Herdr e os arquivos necessários
+ao boot fora de `/home/dev`, em container descartável sem montar o home real.
+O deploy não escolhe `latest` automaticamente. Usar os aliases do fork validado;
+reinstalar os aliases genéricos por `curl` pode desfazer essa proteção.
+
+### Acesso pelo PC e VS Code
+
+O firewall público permite TCP 22, 80 e 443. A porta 2222 fica bloqueada
+externamente. O sshd do host permite ao root somente forwarding local para
+`127.0.0.1:2222`; clipboard e CDP são encaminhados pela conexão ao container.
+A chave operacional `AI_WORKSPACE_DESTINATION_SSH_PRIVATE_KEY` tem fonte no
+Infisical `prod`, `/operator/local`, e consumidor `/root/.ssh/id_aiworkspace`
+no destino, com modo `0600`. O PC utiliza suas próprias chaves autorizadas.
+
+```sh
+ssh -J root@207.180.3.209 -p 2222 \
+  -o HostKeyAlias=aiworkspace-destino dev@127.0.0.1
+```
+
+Conferir o fingerprint do sshd restaurado antes de aceitar a host key. Para
+VS Code Remote SSH, usar um alias distinto da origem em `~/.ssh/config` do PC:
+
+```sshconfig
+Host aiworkspace-destino
+    HostName 127.0.0.1
+    Port 2222
+    User dev
+    ProxyJump root@207.180.3.209
+    HostKeyAlias aiworkspace-destino
+```
+
+Para clipboard e CDP, após iniciar os serviços no container:
+
+```sh
+ssh -N -J root@207.180.3.209 -p 2222 \
+  -o HostKeyAlias=aiworkspace-destino \
+  -L 13456:127.0.0.1:3456 -L 19222:127.0.0.1:9222 dev@127.0.0.1
+```
+
+O conteúdo do script `idev/osagenda` do PC ainda não foi informado. Preservar o
+atalho atual até conferir esse script e validar o novo acesso com o usuário.
+
+### Cópia do home e SQLite
+
+A cópia está em andamento; os seis bancos SQLite do Codex usam online backup.
+Não há ainda confirmação de restauração ou validação desses bancos no destino.
+
+1. Inventariar todo `/home/dev` e copiar preservando permissões e arquivos ocultos.
+2. Para cada SQLite em uso, gerar um backup consistente pela API
+   `sqlite3.Connection.backup`, sem copiar `.db`, `-wal` e `-shm` separadamente.
+3. Restaurar os backups com os consumidores do destino parados. Não reutilizar
+   WAL/SHM antigos junto do banco restaurado; validar cada cópia com
+   `PRAGMA integrity_check` retornando `ok` e conferir caminhos, contagens e
+   permissões.
+4. Validar SSH, IDE, repositórios e abertura dos agentes em Herdr no destino.
+5. Antes de promover o destino, pausar os escritores da origem e os consumidores
+   do destino durante o delta final do home e dos backups SQLite. Manter a origem
+   e seu backup até a confirmação do usuário, evitando alterações concorrentes
+   no mesmo projeto.
+
 ---
 
 ## TL;DR
@@ -22,7 +117,7 @@ Em SSH_AUTHORIZED_KEYS: descomente a linha e cole a chave publica do passo 1
 Deploy the stack
 
 # 3. Instalar atalhos no host
-curl -fsSL https://raw.githubusercontent.com/ffmenezes/ai-workspace/main/setup-host-aliases.sh | bash && source ~/.bashrc
+curl -fsSL https://raw.githubusercontent.com/leonardodnldigital-dotcom/ai-workspace/main/setup-host-aliases.sh | bash && source ~/.bashrc
 
 # 4. Testar acesso ao container
 ai-enter                                   # shell zsh direto — confirma que tudo subiu
@@ -39,9 +134,9 @@ ai-dev meu-projeto --danger                # defaults + skip-permissions/yolo
 ai-dev-danger meu-projeto                  # atalho pra --danger
 ai-help                                    # lista todos os comandos
 
-# Dentro do tmux:
-# Ctrl+B 1/2/3...  → alternar windows
-# Ctrl+B d          → sair sem matar
+# Dentro do Herdr:
+# Ctrl+B 1/2/3...  → alternar abas
+# Ctrl+B q          → sair sem encerrar os agents
 ```
 
 ### TL;DR — Clipboard + Browser (tunnel completo)
@@ -74,7 +169,7 @@ na VPS. Terminal, contexto do Claude, historico do Gemini, tudo intacto.
 ### Multiplos AI agents no mesmo projeto, sob demanda
 
 8 agents disponiveis no mesmo diretorio. Use `--all` pra abrir todos, ou
-so o que precisar. Cada um numa window tmux, sem competir por recursos
+so o que precisar. Cada um numa aba Herdr, sem competir por recursos
 quando nao esta em uso. Configure defaults com `ai-setup`.
 
 ### Seguranca por isolamento
@@ -103,14 +198,14 @@ Seu AI agent tem acesso ao mesmo ecossistema que seus servicos de producao.
 
 ### Sessoes que sobrevivem a tudo
 
-Desconectou o SSH? Caiu a internet? Fechou o Termius sem querer? O tmux
+Desconectou o SSH? Caiu a internet? Fechou o Termius sem querer? O Herdr
 continua rodando. Os agents continuam executando.
 Voce reconecta e ta tudo la.
 
 ### Zero setup por projeto
 
 Um comando (`ai-dev nome`) cria o workspace completo. Multiplos projetos rodam
-em paralelo como sessoes tmux independentes.
+em paralelo como sessoes Herdr independentes.
 
 ### Reprodutivel e portavel
 
@@ -183,7 +278,7 @@ VPS (Debian 12)
 | Ferramenta | Funcao |
 |------------|--------|
 | cloudflared | Quick tunnel pra expor localhost |
-| tmux | Multiplexador de terminal |
+| Herdr | Multiplexador de terminal com estado dos agents |
 | Go 1.24 | Runtime Go |
 | Rust | Toolchain Rust (cargo, rustc) |
 | uv + Python 3 | Gerenciador Python moderno + runtime |
@@ -239,7 +334,7 @@ docker stack deploy -c aiworkspace.yaml aiworkspace
 ## Passo 4: Configurar aliases no host
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ffmenezes/ai-workspace/main/setup-host-aliases.sh | bash
+curl -fsSL https://raw.githubusercontent.com/leonardodnldigital-dotcom/ai-workspace/main/setup-host-aliases.sh | bash
 source ~/.bashrc
 ```
 
@@ -387,28 +482,24 @@ ai-dev-danger meu-projeto               # atalho pra --danger
 | cline | `--yolo` |
 | aider | `--yes-always` |
 
-### Dentro do tmux
+### Dentro do Herdr
 
 ```bash
-# ── Windows (cada agent abre numa window) ──
+# ── Abas (cada agent abre numa aba) ──
 Ctrl+B 1     → Claude Code
 Ctrl+B 2     → Gemini / Qwen / etc. (depende do que abriu)
-Ctrl+B n     → proxima window
-Ctrl+B p     → window anterior
-Ctrl+B w     → lista visual de todas as windows
+Ctrl+B n     → proxima aba
+Ctrl+B p     → aba anterior
+Ctrl+B w     → navegacao de workspaces
 
 # ── Splits ──
-Ctrl+B |     → split vertical
+Ctrl+B v     → split vertical
 Ctrl+B -     → split horizontal
-Ctrl+B ←↑→↓  → navegar entre splits
+Ctrl+B h/j/k/l → navegar entre panes
 
 # ── Sessoes (cada projeto = uma sessao) ──
-Ctrl+B s     → menu visual de todas as sessoes
-Ctrl+B d     → detach (sessao continua rodando)
-
-# ── Matar ──
-Ctrl+B X     → matar sessao atual (com confirmacao)
-Ctrl+B Q     → matar TODAS as sessoes (com confirmacao)
+Ctrl+B q     → detach (sessao continua rodando)
+# Para outro projeto, saia com Ctrl+B q e rode ai-dev outro-projeto
 ```
 
 ### Gerenciar sessoes
@@ -422,16 +513,16 @@ ai-delete meu-projeto          # mata sessao + APAGA pasta do projeto
 
 ### Multiplos projetos ao mesmo tempo
 
-Cada `ai-dev` cria uma sessao tmux independente:
+Cada `ai-dev` cria uma sessao Herdr independente:
 
 ```bash
 ai-dev projeto-a --claude
-Ctrl+B d                       # detach
+Ctrl+B q                       # detach
 
 ai-dev projeto-b --gemini
-Ctrl+B d
+Ctrl+B q
 
-Ctrl+B s                       # menu visual pra alternar
+ai-dev projeto-a               # reconecta ao primeiro projeto
 ```
 
 ### Quick Tunnel (acessar localhost de qualquer lugar)
@@ -633,18 +724,18 @@ Rode `ai-help` pra ver a referencia completa. Resumo:
 | Comando | Onde | Descricao |
 |---------|------|-----------|
 | `ai-enter` | Host | Shell zsh dentro do container |
-| `ai-attach` | Host | Anexa ao tmux principal ("main") |
-| `ai-update [imagem]` | Host | Pull + force update do servico Swarm |
+| `ai-attach` | Host | Anexa ao Herdr principal ("main") |
+| `ai-update [imagem]` | Host | Reaplica a imagem atual; argumento explícito troca versão após validação |
 | `ai-version` | Host | Versao da imagem + boot log |
 | `ai-fix-perms` | Host | Corrige owner em ~/projects (dev:dev) |
 | `ai-ssh` | Host | SSH direto no container (porta 2222) |
 | `ai-tunnel <porta> [...]` | Host | SSH tunnel de portas para o container |
 | `ai-clipboard [porta]` | Host | Clipboard bridge: cola imagens via browser (default :3456) |
 | `ai-browser [porta\|status\|stop]` | Container | Chromium headless com CDP (default :9222) |
-| `ai-dev <projeto> [flags]` | H/C | Cria/reconecta workspace tmux |
+| `ai-dev <projeto> [flags]` | H/C | Cria/reconecta sessao Herdr |
 | `ai-dev-danger <projeto>` | H/C | Atalho: ai-dev + --danger |
 | `ai-sessions` | H/C | Lista sessoes + processos + recursos |
-| `ai-kill <projeto>` | H/C | Mata uma sessao tmux |
+| `ai-kill <projeto>` | H/C | Mata uma sessao Herdr |
 | `ai-kill-all` | H/C | Mata todas as sessoes (preserva "main") |
 | `ai-delete <projeto>` | H/C | Mata sessao + apaga pasta do projeto |
 | `ai-setup` | H/C | Define quais agents abrem por padrao |
@@ -699,25 +790,27 @@ Pacotes assim **nao sobrevivem a rebuild**. Se for algo permanente, adicione ao 
 
 ### Atualizar as CLIs
 
-**A forma confiavel de atualizar qualquer CLI e rebuild da imagem + `ai-update`.**
+Para atualizar CLIs, construir uma imagem validada com Herdr e informar sua
+referência explicitamente ao `ai-update`. Sem argumento, ele reaplica a imagem
+atual do serviço, preservando a versão.
 
 ```bash
-# Na VPS:
-ai-update
+# Na VPS, com a imagem local validada nesta preparação:
+ai-update aiworkspace-herdr:migration-20260930
 
-# O que ele faz:
-# docker pull ghcr.io/ffmenezes/ai-workspace:latest
-# docker service update --image ... --force aiworkspace_aiworkspace
+# Reaplicar a imagem atual sem escolher uma nova versão:
+ai-update
 ```
 
-A imagem e buildada automaticamente pelo GitHub Actions a cada push em `main`.
-Fluxo tipico:
+Uma imagem local já presente dispensa pull. Caso contrário, o helper busca a
+referência explícita e valida Herdr e os artefatos de boot em container
+descartável antes do rolling update. Para uma nova versão pelo GitHub Actions:
 
 1. Editar Dockerfile (ou qualquer arquivo)
 2. `git push`
 3. Aguardar Actions (~5-10min)
-4. Na VPS: `ai-update`
-5. Sessoes tmux antigas morrem (esperado), volumes persistem
+4. Na VPS: chamar `ai-update` com a referência da imagem Herdr validada
+5. Sessoes em execucao sao encerradas; os volumes persistem
 
 Para usar uma instancia Swarm com nome diferente, exporte
 `AI_WORKSPACE_SERVICE=meu_servico` antes de chamar `ai-update`.
@@ -783,7 +876,7 @@ cline --version               # Cline CLI
 aider --version               # Aider
 cloudflared --version         # cloudflared
 ai-dev teste --claude         # Workspace criado
-Ctrl+B d                      # Detach
+Ctrl+B q                      # Detach
 ai-kill teste                 # Cleanup
 ai-sessions                   # Status
 exit

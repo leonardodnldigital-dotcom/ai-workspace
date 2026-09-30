@@ -30,7 +30,7 @@ Infra-as-code for a containerized multi-agent dev environment built around eight
 - **Browser automation**: `agent-browser` (Vercel Labs) — `npm i -g agent-browser`; native Rust CLI that controls Chrome/Chromium via CDP. Auto-detects Playwright's Chromium in `/opt/ms-playwright` and supports Lightpanda as alternative engine (`--engine lightpanda`). Installed globally, not an AI CLI — it's a tool the agents use. SKILL.md is a default global skill seeded into `~/.agents/skills/agent-browser/` on first boot from `/opt/default-skills/`.
   **Update story**: Claude and Cursor have native auto-updaters that are *intentionally bypassed* — both binaries are copied to `/opt/{claude,cursor-agent}` (read-only) and symlinked into PATH. Auto-updates download to `~/.local/share/...` but the symlink keeps pointing at the build-time version, so they never run. The only reliable update path for any CLI is image rebuild + `ai-update`. Gemini/Qwen/OpenCode can be updated pontually via `npm update -g ...` inside the container, but those changes vanish on rebuild. When changing how a CLI is installed, updated, or authenticated, update Dockerfile + aiworkspace.yaml + README in lockstep.
 - **Container user**: runs as non-root `dev`. Dockerfile ends with `USER root` (for sshd), but the entrypoint drops to `dev` via `gosu`. All host aliases use `-u dev`. No sudo inside; use `docker exec -u root` from the host for system changes.
-- **Entrypoint** (`scripts/entrypoint.sh`): runs as root — starts sshd, seeds skills, restores backups — then drops to `dev` via `gosu` for tmux + tail.
+- **Entrypoint** (`scripts/entrypoint.sh`): runs as root — starts sshd, seeds skills, restores backups — then drops to `dev` via `gosu` for Herdr + tail.
 - **Persistence** is entirely in named Docker volumes mounted into `/home/dev`:
   - `aiworkspace_projects` → `~/projects`
   - `aiworkspace_config` → `~/.config`
@@ -55,8 +55,8 @@ Infra-as-code for a containerized multi-agent dev environment built around eight
 
 `scripts/ai-dev` is the workspace launcher invoked from the host. It:
 1. Resolves a project name to `~/projects/<name>` inside the container.
-2. Creates (or attaches to) a tmux session named after the project.
-3. Opens windows based on flags. **Default (no agent flag) opens all eight agents**; naming any agent flag (`--claude`, `--gemini`, `--qwen`, `--cursor`, `--opencode`, `--codex`, `--cline`, `--aider`) restricts to only the named ones. `--rc` adds Remote Control to Claude. `--danger` passes the per-CLI danger flag (`--dangerously-skip-permissions`, `--yolo`, `-f`, `--yes-always`). `--clipboard` starts the clipboard bridge. `--browser` starts the shared Chromium CDP. `ai-dev-danger` = `ai-dev <projeto> --danger`.
+2. Creates (or attaches to) a named Herdr session for the project.
+3. Creates one workspace with an agent per tab plus a shell tab. **Default (no agent flag) opens all eight agents**; naming any agent flag (`--claude`, `--gemini`, `--qwen`, `--cursor`, `--opencode`, `--codex`, `--cline`, `--aider`) restricts to only the named ones. `--rc` adds Remote Control to Claude. `--danger` passes the per-CLI danger flag (`--dangerously-skip-permissions`, `--yolo`, `-f`, `--yes-always`). `--clipboard` starts the clipboard bridge. `--browser` starts the shared Chromium CDP. `ai-dev-danger` = `ai-dev <projeto> --danger`.
 
 When changing agent invocation, flags, or window layout, edit `scripts/ai-dev` and keep `scripts/ai-kill`, `scripts/ai-kill-all`, and `scripts/ai-sessions` consistent with session naming. Container scripts and host aliases share the same names by convention — if you rename one, rename both and update `ai-help`.
 
@@ -80,7 +80,7 @@ Skills in the repo's `.agents/skills/` directory are baked into the image at `/o
 
 ## Ralph loop
 
-`scripts/ralph` runs an agent (claude/gemini/qwen/cursor/opencode) in a loop until it emits a stop word (default `RALPH_DONE`) or hits `--max`. Iteration logs go to `.ralph-logs/` inside the target project. Used for long-running autonomous tasks; users typically start it then detach from tmux. OpenCode uses a `run` subcommand instead of `-p` and has no danger mode.
+`scripts/ralph` runs an agent (claude/gemini/qwen/cursor/opencode) in a loop until it emits a stop word (default `RALPH_DONE`) or hits `--max`. Iteration logs go to `.ralph-logs/` inside the target project. Used for long-running autonomous tasks; users typically start it then detach from Herdr. OpenCode uses a `run` subcommand instead of `-p` and has no danger mode.
 
 ## Docs
 

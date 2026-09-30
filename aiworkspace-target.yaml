@@ -1,0 +1,62 @@
+# Target Swarm stack. Preserve the restored home in its external volume.
+version: "3.8"
+
+services:
+  aiworkspace:
+    image: "${AI_WORKSPACE_IMAGE:?AI_WORKSPACE_IMAGE is required}"
+    stdin_open: true
+    tty: true
+    environment:
+      TERM: xterm-256color
+      LANG: C.UTF-8
+      SSH_AUTHORIZED_KEYS: "${SSH_AUTHORIZED_KEYS:-}"
+    volumes:
+      - aiworkspace_home:/home/dev
+    networks:
+      - workspace
+    ports:
+      - target: 2222
+        published: 2222
+        protocol: tcp
+        mode: host
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -ec
+        - 'test -s /run/sshd.pid && read -r workspace_sshd_pid < /run/sshd.pid && kill -0 "$$workspace_sshd_pid" && : >/dev/tcp/127.0.0.1/2222'
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.aiworkspace == true
+      update_config:
+        order: stop-first
+        failure_action: rollback
+      rollback_config:
+        order: stop-first
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 0
+        window: 120s
+      resources:
+        limits:
+          cpus: "8"
+          memory: 32G
+        reservations:
+          cpus: "1"
+          memory: 2G
+
+volumes:
+  aiworkspace_home:
+    external: true
+    name: aiworkspace_home
+
+networks:
+  workspace:
+    driver: overlay

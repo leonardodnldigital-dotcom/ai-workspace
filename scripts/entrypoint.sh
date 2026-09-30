@@ -7,6 +7,20 @@
 # ══════════════════════════════════════════════════════════════
 set -e
 
+# Seed a new whole-home volume and update only the scripts owned by this image.
+# Existing shell settings, credentials and user scripts remain in the volume.
+install -d -o dev -g dev -m 0750 /home/dev
+install -d -o dev -g dev -m 0755 /home/dev/bin
+for script in /opt/ai-workspace/bin/*; do
+    [ -f "$script" ] || continue
+    install -o dev -g dev -m 0755 "$script" "/home/dev/bin/$(basename "$script")"
+done
+for shell in zshrc bashrc; do
+    if [ ! -f "/home/dev/.$shell" ] && [ -f "/opt/ai-workspace/$shell" ]; then
+        install -o dev -g dev -m 0644 "/opt/ai-workspace/$shell" "/home/dev/.$shell"
+    fi
+done
+
 LOG="/home/dev/.ai-workspace.log"
 
 log() {
@@ -78,6 +92,20 @@ chown -R dev:dev /home/dev/.ssh 2>/dev/null || true
 # Inicia sshd em background
 /usr/sbin/sshd
 log "sshd started on port 2222"
+chown dev:dev "$LOG"
 
-# ── 5. Dropa pra dev → tmux + tail ──
-exec gosu dev bash -c "tmux new-session -d -s main && tail -f $LOG"
+# ── 5. Dropa pra dev → Herdr + tail ──
+# A PID from the previous container cannot identify a process in this boot.
+rm -f /home/dev/.ai-browser.pid
+exec gosu dev bash -ec '
+    herdr --session main server >> /home/dev/.ai-workspace.log 2>&1 &
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        herdr --session main workspace list >/dev/null 2>&1 && break
+        sleep 0.2
+    done
+    state=$(herdr --session main workspace list)
+    if ! jq -e ".result.workspaces | length > 0" <<< "$state" >/dev/null; then
+        herdr --session main workspace create --cwd /home/dev/projects --label main >/dev/null
+    fi
+    exec tail -f /home/dev/.ai-workspace.log
+'

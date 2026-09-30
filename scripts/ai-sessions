@@ -1,6 +1,6 @@
 #!/bin/bash
 # ══════════════════════════════════════════════════════════════
-# ai-sessions — Status de todas as sessões tmux e recursos do workspace
+# ai-sessions — Status de todas as sessões Herdr e recursos do workspace
 # ══════════════════════════════════════════════════════════════
 
 echo "══════════════════════════════════════"
@@ -8,9 +8,9 @@ echo "  AI Workspace Status"
 echo "══════════════════════════════════════"
 echo ""
 
-# Sessões tmux
-echo "📺 Sessões tmux:"
-if tmux ls 2>/dev/null; then
+# Sessões Herdr
+echo "📺 Sessões Herdr:"
+if herdr session list; then
     echo ""
 else
     echo "   Nenhuma sessão ativa"

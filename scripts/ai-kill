@@ -5,13 +5,19 @@
 # ══════════════════════════════════════════════════════════════
 
 PROJECT="${1:?Uso: ai-kill <nome-do-projeto>}"
+[[ "$PROJECT" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ && "$PROJECT" != main && "$PROJECT" != default ]] || { echo "Nome de projeto inválido: $PROJECT" >&2; exit 1; }
 
-if tmux has-session -t "$PROJECT" 2>/dev/null; then
-    tmux kill-session -t "$PROJECT"
+SESSION_LIST=$(herdr session list --json) || exit 1
+RUNNING=$(jq -r --arg name "$PROJECT" '.sessions[] | select(.name == $name) | .running' <<< "$SESSION_LIST") || exit 1
+if [ -n "$RUNNING" ]; then
+    if [ "$RUNNING" = true ]; then
+        herdr session stop "$PROJECT" >/dev/null || exit 1
+    fi
+    herdr session delete "$PROJECT" >/dev/null || exit 1
     echo "🗑️  Sessão '$PROJECT' encerrada."
 else
     echo "❌ Sessão '$PROJECT' não encontrada."
     echo ""
     echo "Sessões ativas:"
-    tmux ls 2>/dev/null || echo "   Nenhuma"
+    herdr session list
 fi

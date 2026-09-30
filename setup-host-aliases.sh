@@ -46,24 +46,23 @@ ai-enter() {
     docker exec -it -u dev "$CID" zsh -l
 }
 
-# Anexar ao tmux principal do container
+# Anexar ao Herdr principal do container
 ai-attach() {
     local CID; CID=$(_ai_require_container) || return 1
-    docker exec -it -u dev "$CID" tmux attach -t main 2>/dev/null \
-        || docker exec -it -u dev "$CID" zsh -l
+    docker exec -it -u dev "$CID" herdr --session main
 }
 
-# Criar/reconectar workspace tmux de um projeto
+# Criar/reconectar sessão Herdr de um projeto
 # Uso: ai-dev <projeto> [--claude] [--gemini] [--qwen] [--cursor] [--opencode] [--codex] [--cline] [--aider] [--rc] [--danger] [--clipboard] [--browser]
 ai-dev() {
     local CID; CID=$(_ai_require_container) || return 1
-    docker exec -it -u dev "$CID" zsh -lc "ai-dev $*"
+    docker exec -it -u dev "$CID" ai-dev "$@"
 }
 
 # Atalho: workspace com todos os agents em modo danger
 ai-dev-danger() {
     local CID; CID=$(_ai_require_container) || return 1
-    docker exec -it -u dev "$CID" zsh -lc "ai-dev $1 --danger"
+    docker exec -it -u dev "$CID" ai-dev "$1" --danger
 }
 
 # Mostrar versão da imagem rodando no container
@@ -72,13 +71,13 @@ ai-version() {
     docker exec -u dev "$CID" bash -c 'echo "version: $AI_WORKSPACE_VERSION"; echo "commit:  $AI_WORKSPACE_COMMIT"; echo "built:   $AI_WORKSPACE_BUILD_DATE"; echo ""; echo "Boot log (últimas 5 entradas):"; tail -5 /home/dev/.ai-workspace.log 2>/dev/null || echo "(sem log)"'
 }
 
-# Listar sessões tmux ativas no container
+# Listar sessões Herdr ativas no container
 ai-sessions() {
     local CID; CID=$(_ai_require_container) || return 1
     docker exec -it -u dev "$CID" ai-sessions
 }
 
-# Matar uma sessão tmux específica
+# Matar uma sessão Herdr específica
 ai-kill() {
     local CID; CID=$(_ai_require_container) || return 1
     docker exec -it -u dev "$CID" ai-kill "$1"
@@ -100,7 +99,7 @@ ai-delete() {
     docker exec -it -u dev "$CID" ai-delete "$PROJECT"
 }
 
-# Matar TODAS as sessões tmux de projeto (preserva "main")
+# Matar TODAS as sessões Herdr de projeto (preserva "main")
 ai-kill-all() {
     local CID; CID=$(_ai_require_container) || return 1
     docker exec -it -u dev "$CID" ai-kill-all
@@ -113,19 +112,21 @@ ai-fix-perms() {
     echo "✅ Permissões corrigidas em ~/projects"
 }
 
-# Atualizar imagem do AI Workspace (pull + force update do serviço Swarm)
+# Reaplicar a imagem atual ou trocar para uma imagem explícita com Herdr.
 # Service name overridable via AI_WORKSPACE_SERVICE env var.
 ai-update() {
-    local IMAGE="${1:-ghcr.io/ffmenezes/ai-workspace:latest}"
     local SERVICE="${AI_WORKSPACE_SERVICE:-aiworkspace_aiworkspace}"
+    local IMAGE
+    IMAGE="${1:-$(docker service inspect --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}' "$SERVICE")}" || return 1
+    [ -n "$IMAGE" ] || { echo "Informe a imagem para atualizar." >&2; return 1; }
 
-    # Avisar se há sessões tmux que vão morrer no restart
+    # Avisar se há sessões ativas que vão morrer no restart
     local CID; CID=$(_ai_container)
     if [ -n "$CID" ]; then
         local ACTIVE
-        ACTIVE=$(docker exec "$CID" tmux ls -F '#{session_name}' 2>/dev/null | grep -v '^main$' || true)
+        ACTIVE=$(docker exec -u dev "$CID" sh -c 'herdr session list --json | jq -r ".sessions[] | select(.running) | .name"' 2>/dev/null || true)
         if [ -n "$ACTIVE" ]; then
-            echo "⚠️  As seguintes sessões tmux serão encerradas pelo restart:"
+            echo "⚠️  As seguintes sessões serão encerradas pelo restart:"
             echo "$ACTIVE" | sed 's/^/    - /'
             read -rp "Continuar? [s/N]: " CONFIRM
             case "$CONFIRM" in
@@ -135,16 +136,22 @@ ai-update() {
         fi
     fi
 
-    echo "📥 Baixando imagem: $IMAGE"
-    docker pull "$IMAGE" || { echo "❌ Falha no pull"; return 1; }
+    if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+        echo "Baixando imagem: $IMAGE"
+        docker pull "$IMAGE" || { echo "Falha no pull" >&2; return 1; }
+    fi
+    docker run --rm --entrypoint sh "$IMAGE" -ec \
+        'command -v herdr >/dev/null && ! command -v tmux >/dev/null && test -x /usr/local/bin/entrypoint.sh && test -f /opt/ai-workspace/bin/ai-dev' \
+        || { echo "Imagem sem o Herdr e os scripts necessários. Atualização cancelada." >&2; return 1; }
     echo "♻️  Atualizando serviço Swarm: $SERVICE"
-    docker service update --image "$IMAGE" --force "$SERVICE"
+    docker service update --no-resolve-image --image "$IMAGE" --force "$SERVICE" || return 1
     echo "✅ Workspace atualizado"
 }
 
 # SSH direto no container (requer authorized_keys no volume .ssh)
 ai-ssh() {
-    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 dev@localhost "$@"
+    ssh -o StrictHostKeyChecking=accept-new -o IdentitiesOnly=yes \
+        -i "${AI_WORKSPACE_SSH_IDENTITY:-$HOME/.ssh/id_aiworkspace}" -p 2222 dev@localhost "$@"
 }
 
 # Clipboard bridge: inicia servidor web no container + abre tunnel
@@ -155,7 +162,7 @@ ai-clipboard() {
     local PORT="${1:-3456}"
 
     # Checar se já tem servidor rodando nessa porta
-    if docker exec "$CID" bash -c "ss -tlnp 2>/dev/null | grep -q ':$PORT '" 2>/dev/null; then
+    if docker exec "$CID" bash -c ': >"/dev/tcp/127.0.0.1/$1"' ai-clipboard "$PORT" >/dev/null 2>&1; then
         echo "📋 Clipboard já rodando na porta $PORT"
     else
         echo "📋 Iniciando ai-clipboard na porta $PORT..."
@@ -171,7 +178,7 @@ ai-clipboard() {
     echo "   Ctrl+V cola imagem → @path copiado automaticamente"
     echo "   Ctrl+C para encerrar tunnel"
     echo ""
-    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -N -L "$PORT:localhost:$PORT" -p 2222 dev@localhost
+    ai-ssh -N -L "$PORT:localhost:$PORT"
 }
 
 # SSH tunnel: forward de porta local para o container
@@ -179,13 +186,13 @@ ai-clipboard() {
 #       ai-tunnel 9222 3000    (forward múltiplas portas)
 ai-tunnel() {
     [ $# -eq 0 ] && { echo "Uso: ai-tunnel <porta> [porta2] [porta3] ..."; return 1; }
-    local FORWARDS=""
+    local PORT FORWARDS=()
     for PORT in "$@"; do
-        FORWARDS="$FORWARDS -L $PORT:localhost:$PORT"
+        FORWARDS+=(-L "$PORT:localhost:$PORT")
     done
     echo "Tunnel ativo: $(echo "$@" | tr ' ' ', ') → container"
     echo "Ctrl+C para encerrar"
-    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -N $FORWARDS -p 2222 dev@localhost
+    ai-ssh -N "${FORWARDS[@]}"
 }
 
 # Ajuda — lista todos os comandos ai-* disponíveis
@@ -204,7 +211,7 @@ ai-help() {
   Comando                    Onde   Descrição
   ────────────────────────── ────── ────────────────────────────────────
   ai-enter                   H      Shell zsh dentro do container
-  ai-attach                  H      Anexa ao tmux principal (sessão "main")
+  ai-attach                  H      Anexa ao Herdr principal (sessão "main")
   ai-update [imagem]         H      Pull + force update do serviço Swarm
                                     (AI_WORKSPACE_SERVICE override do nome)
   ai-version                 H      Mostra versão da imagem em execução + boot log
@@ -216,10 +223,10 @@ ai-help() {
   ai-browser [porta|status|stop] C  Chromium headless com CDP (default porta 9222)
   ai-help                    H/C    Esta ajuda
 
-  ai-dev <projeto> [flags]   H/C    Cria/reconecta workspace tmux do projeto
+  ai-dev <projeto> [flags]   H/C    Cria/reconecta sessão Herdr do projeto
   ai-dev-danger <projeto>    H/C    Atalho: ai-dev <projeto> --danger
-  ai-sessions                H/C    Lista sessões tmux + processos + recursos
-  ai-kill <projeto>          H/C    Mata uma sessão tmux específica
+  ai-sessions                H/C    Lista sessões Herdr + processos + recursos
+  ai-kill <projeto>          H/C    Mata uma sessão Herdr específica
   ai-kill-all                H/C    Mata TODAS as sessões (preserva "main")
   ai-delete <projeto>        H/C    Mata sessão + APAGA pasta do projeto
 
@@ -331,10 +338,10 @@ echo ""
 echo "✅ Aliases instalados!"
 echo ""
 echo "   ai-enter           → Shell zsh dentro do container"
-echo "   ai-attach          → Anexar ao tmux principal"
+echo "   ai-attach          → Anexar ao Herdr principal"
 echo "   ai-dev <proj>      → Workspace de projeto (todos os agents por padrão)"
 echo "   ai-dev-danger <p>  → Workspace com --danger"
-echo "   ai-sessions        → Listar sessões tmux"
+echo "   ai-sessions        → Listar sessões Herdr"
 echo "   ai-kill <proj>     → Matar sessão"
 echo "   ai-kill-all        → Matar todas as sessões de projeto"
 echo "   ai-fix-perms       → Corrigir permissões em ~/projects"

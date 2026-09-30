@@ -35,8 +35,12 @@ alias lt='eza -la --tree --level=2 --icons'
 alias lsi='eza --icons --group-directories-first'
 
 # ── AI Workspace aliases ──
-alias tls='tmux ls'
-alias ta='tmux attach -t'
+alias tls='herdr session list'
+alias ta='herdr session attach'
+
+# Atalho para os projetos: p buga, p osagenda, p (lista de projetos)
+p() { cd "$HOME/projects/${1:-}"; }
+compdef '_files -W ~/projects -/' p
 
 # ── AI agents ──
 alias cc='claude'

@@ -1,10 +1,11 @@
 #!/bin/bash
 # ══════════════════════════════════════════════════════════════
-# ai-delete — Encerra sessão tmux e apaga pasta do projeto
+# ai-delete — Encerra sessão Herdr e apaga pasta do projeto
 # Uso: ai-delete <nome-do-projeto>
 # ══════════════════════════════════════════════════════════════
 
 PROJECT="${1:?Uso: ai-delete <nome-do-projeto>}"
+[[ "$PROJECT" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ && "$PROJECT" != main && "$PROJECT" != default ]] || { echo "Nome de projeto inválido: $PROJECT" >&2; exit 1; }
 PROJECT_DIR="$HOME/projects/$PROJECT"
 
 if [ ! -d "$PROJECT_DIR" ]; then
@@ -14,8 +15,9 @@ fi
 
 echo "⚠️  Isso vai APAGAR permanentemente:"
 echo "   📁 $PROJECT_DIR"
-if tmux has-session -t "$PROJECT" 2>/dev/null; then
-    echo "   🖥️  Sessão tmux '$PROJECT'"
+SESSION_LIST=$(herdr session list --json) || exit 1
+if jq -e --arg name "$PROJECT" '.sessions[] | select(.name == $name)' <<< "$SESSION_LIST" >/dev/null; then
+    echo "   🖥️  Sessão Herdr '$PROJECT'"
 fi
 echo ""
 read -p "Digite o nome do projeto ($PROJECT) para confirmar: " confirm
@@ -24,9 +26,14 @@ if [ "$confirm" != "$PROJECT" ]; then
     exit 0
 fi
 
-# Mata sessão tmux se existir
-if tmux has-session -t "$PROJECT" 2>/dev/null; then
-    tmux kill-session -t "$PROJECT"
+# Mata sessão Herdr se existir
+SESSION_LIST=$(herdr session list --json) || exit 1
+RUNNING=$(jq -r --arg name "$PROJECT" '.sessions[] | select(.name == $name) | .running' <<< "$SESSION_LIST") || exit 1
+if [ -n "$RUNNING" ]; then
+    if [ "$RUNNING" = true ]; then
+        herdr session stop "$PROJECT" >/dev/null || exit 1
+    fi
+    herdr session delete "$PROJECT" >/dev/null || exit 1
     echo "🗑️  Sessão '$PROJECT' encerrada."
 fi
 

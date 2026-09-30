@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Essenciais
     curl wget git jq unzip ca-certificates gnupg \
     # Terminal
-    tmux zsh \
+    zsh \
     # Busca rápida (usado pelos AI agents)
     ripgrep fd-find \
     # Python
@@ -39,6 +39,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # sshd config: pubkey only, porta 2222, tunnel habilitado
     && mkdir -p /run/sshd \
     && printf 'Port 2222\nPermitRootLogin no\nPasswordAuthentication no\nPubkeyAuthentication yes\nAllowUsers dev\nX11Forwarding no\nAllowTcpForwarding yes\nGatewayPorts no\nPrintMotd no\n' > /etc/ssh/sshd_config.d/workspace.conf
+
+# Herdr: release fixa e verificada (x86_64 / aarch64).
+ARG HERDR_VERSION=0.9.1
+RUN arch="$(uname -m)" \
+    && case "$arch" in \
+        x86_64) checksum=2a02fed16beb651ef006e1d43f048f652ca4dc58ad053cd2d44450563d5c54b7 ;; \
+        aarch64) checksum=f4ccf4de745f2cb9a39a983e9ba3703dad50ec2a58dea83026ceab721bbd8d9e ;; \
+        *) echo "Unsupported Herdr architecture: $arch" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSL --retry 3 "https://github.com/herdrdev/herdr/releases/download/v${HERDR_VERSION}/herdr-linux-${arch}" -o /usr/local/bin/herdr \
+    && echo "$checksum  /usr/local/bin/herdr" | sha256sum -c - \
+    && chmod +x /usr/local/bin/herdr
 
 # ══════════════════════════════════════════════════════════════
 # LAYER 2: Runtimes e build tools (raramente muda)
@@ -208,12 +220,14 @@ RUN mkdir -p /home/dev/.config \
     && printf '\n[container]\ndisabled = true\n' >> /home/dev/.config/starship.toml \
     && printf '\n[gcloud]\ndisabled = true\n' >> /home/dev/.config/starship.toml
 
-# ── tmux ──
-COPY --chown=dev:dev tmux.conf /home/dev/.tmux.conf
-
 # ── Scripts ──
 COPY --chown=dev:dev scripts/ /home/dev/bin/
 RUN chmod +x /home/dev/bin/*
+# A whole-home volume hides /home/dev from the image. Keep boot artifacts
+# outside that mount so validated scripts survive image updates.
+COPY scripts/ /opt/ai-workspace/bin/
+COPY zshrc /opt/ai-workspace/zshrc
+COPY bashrc.append /opt/ai-workspace/bashrc
 
 # ── Zshrc ──
 COPY --chown=dev:dev zshrc /home/dev/.zshrc
@@ -258,7 +272,7 @@ ENV RUSTUP_HOME="/root/.rustup"
 ENV CARGO_HOME="/home/dev/.cargo"
 ENV STARSHIP_CONFIG="/home/dev/.config/starship.toml"
 
-# Entrypoint: roda como root (inicia sshd), dropa pra dev (tmux + tail).
+# Entrypoint: roda como root (inicia sshd), dropa pra dev (Herdr + tail).
 # Lógica extraída para scripts/entrypoint.sh pra manutenção.
 USER root
 COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh

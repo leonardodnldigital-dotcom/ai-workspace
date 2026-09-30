@@ -1,10 +1,11 @@
 #!/bin/bash
 # ══════════════════════════════════════════════════════════════
-# ai-kill-all — Mata TODAS as sessões tmux de projeto
+# ai-kill-all — Mata TODAS as sessões Herdr de projeto
 # Preserva a sessão "main" criada no boot do container.
 # ══════════════════════════════════════════════════════════════
+set -euo pipefail
 
-SESSIONS=$(tmux ls -F '#{session_name}' 2>/dev/null | grep -v '^main$' || true)
+SESSIONS=$(herdr session list --json | jq -r '.sessions[] | select(.name != "main" and .name != "default") | [.name, .running] | @tsv')
 
 if [ -z "$SESSIONS" ]; then
     echo "ℹ️  Nenhuma sessão de projeto pra matar."
@@ -12,12 +13,15 @@ if [ -z "$SESSIONS" ]; then
 fi
 
 echo "Sessões a matar:"
-echo "$SESSIONS" | sed 's/^/  - /'
+echo "$SESSIONS" | cut -f1 | sed 's/^/  - /'
 read -rp "Confirmar? [s/N]: " CONFIRM
 case "$CONFIRM" in
     s|S|sim|y|Y|yes)
-        echo "$SESSIONS" | while read -r s; do
-            tmux kill-session -t "$s" 2>/dev/null
+        echo "$SESSIONS" | while read -r s running; do
+            if [ "$running" = true ]; then
+                herdr session stop "$s" >/dev/null || exit 1
+            fi
+            herdr session delete "$s" >/dev/null || exit 1
             echo "  ✓ $s"
         done
         ;;

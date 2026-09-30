@@ -1,9 +1,10 @@
 #!/bin/bash
 # ══════════════════════════════════════════════════════════════
-# ai-dev — Cria/reconecta workspace tmux por projeto
+# ai-dev — Cria/reconecta sessão Herdr por projeto
 #
 # Uso:
-#   ai-dev <projeto>                     → padrão: TODOS os agents (= --all)
+#   ai-dev                               → escolher projeto em um menu
+#   ai-dev <projeto>                     → agents configurados via ai-setup
 #   ai-dev <projeto> --claude            → só Claude
 #   ai-dev <projeto> --claude --gemini   → Claude + Gemini
 #   ai-dev <projeto> --qwen --cursor     → Qwen + Cursor
@@ -41,8 +42,32 @@
 # ══════════════════════════════════════════════════════════════
 set -e
 
-PROJECT="${1:?Uso: ai-dev <projeto> [--claude] [--gemini] [--qwen] [--cursor] [--opencode] [--codex] [--cline] [--aider] [--all] [--rc] [--danger] [--clipboard] [--browser]}"
-shift
+if [ "$#" -eq 0 ]; then
+    projects=()
+    for dir in "$HOME"/projects/*/; do
+        [ -d "$dir" ] && projects+=("${dir%/}")
+    done
+    [ "${#projects[@]}" -gt 0 ] || { echo "Nenhum projeto em ~/projects" >&2; exit 1; }
+    PS3="Escolha o projeto pelo número: "
+    select PROJECT in "${projects[@]##*/}"; do
+        [ -n "$PROJECT" ] && break
+        echo "Número inválido" >&2
+    done
+    [ -n "${PROJECT:-}" ] || exit 1
+else
+    PROJECT="$1"
+    shift
+fi
+[[ "$PROJECT" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ && "$PROJECT" != main && "$PROJECT" != default ]] || { echo "Nome de projeto inválido: $PROJECT" >&2; exit 1; }
+
+if [ "${HERDR_ENV:-}" = 1 ]; then
+    if [ "${HERDR_SESSION:-}" = "$PROJECT" ]; then
+        echo "Você já está na sessão '$PROJECT'. Para entrar na pasta, digite: source ~/.zshrc; p $PROJECT"
+    else
+        echo "Você já está dentro do Herdr. Pressione Ctrl+B, depois Q; fora dele, rode: ai-dev $PROJECT"
+    fi
+    exit 0
+fi
 
 # ── Parsear flags ──
 RC=false
@@ -86,18 +111,20 @@ CONFIG_FILE="$HOME/.config/ai-workspace/defaults.conf"
 _load_config() {
     if [ -f "$CONFIG_FILE" ]; then
         source "$CONFIG_FILE"
-        for agent in $DEFAULT_AGENTS; do
-            case "$agent" in
-                claude)   CLAUDE=true ;;
-                gemini)   GEMINI=true ;;
-                qwen)     QWEN=true ;;
-                cursor)   CURSOR=true ;;
-                opencode) OPENCODE=true ;;
-                codex)    CODEX=true ;;
-                cline)    CLINE=true ;;
-                aider)    AIDER=true ;;
-            esac
-        done
+        if ! $ANY_AGENT; then
+            for agent in $DEFAULT_AGENTS; do
+                case "$agent" in
+                    claude)   CLAUDE=true ;;
+                    gemini)   GEMINI=true ;;
+                    qwen)     QWEN=true ;;
+                    cursor)   CURSOR=true ;;
+                    opencode) OPENCODE=true ;;
+                    codex)    CODEX=true ;;
+                    cline)    CLINE=true ;;
+                    aider)    AIDER=true ;;
+                esac
+            done
+        fi
         # Serviços: só aplica default se flag não foi passada explicitamente
         $CLIPBOARD || CLIPBOARD="${DEFAULT_CLIPBOARD:-false}"
         $BROWSER   || BROWSER="${DEFAULT_BROWSER:-false}"
@@ -133,11 +160,39 @@ if [ -x "$SETUP_SCRIPT" ]; then
     "$SETUP_SCRIPT" "$DIR" 2>/dev/null || true
 fi
 
+# ── Serviços opcionais (clipboard + browser) ──
+TUNNEL_PORTS=""
+
+if $CLIPBOARD; then
+    CLIP_PORT=3456
+    if ! (: >"/dev/tcp/127.0.0.1/$CLIP_PORT") 2>/dev/null; then
+        node "$HOME/bin/ai-clipboard" "$CLIP_PORT" &
+        disown
+        sleep 1
+    fi
+    TUNNEL_PORTS="$CLIP_PORT"
+fi
+
+if $BROWSER; then
+    CDP_PORT=9222
+    "$HOME/bin/ai-browser" "$CDP_PORT"
+    TUNNEL_PORTS="${TUNNEL_PORTS:+$TUNNEL_PORTS }$CDP_PORT"
+fi
+
 # ── Reconectar se já existe ──
-if tmux has-session -t "$PROJECT" 2>/dev/null; then
+SESSION_STATE=$(herdr --session "$PROJECT" workspace list 2>/dev/null || true)
+[ -n "$SESSION_STATE" ] || SESSION_STATE='{}'
+if ! jq -e '.result.workspaces' <<< "$SESSION_STATE" >/dev/null 2>&1; then
+    herdr --session "$PROJECT" server >/dev/null 2>&1 &
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        herdr --session "$PROJECT" workspace list >/dev/null 2>&1 && break
+        sleep 0.2
+    done
+    SESSION_STATE=$(herdr --session "$PROJECT" workspace list) || { echo "Herdr não iniciou" >&2; exit 1; }
+fi
+if jq -e '.result.workspaces | length > 0' <<< "$SESSION_STATE" >/dev/null 2>&1; then
     echo "♻️  Reconectando na sessão '$PROJECT'..."
-    tmux attach -t "$PROJECT"
-    exit 0
+    exec herdr --session "$PROJECT"
 fi
 
 echo "🚀 Criando workspace '$PROJECT'..."
@@ -168,19 +223,26 @@ $DANGER && CLINE_CMD="$CLINE_CMD --yolo"
 AIDER_CMD="aider"
 $DANGER && AIDER_CMD="$AIDER_CMD --yes-always"
 
-# ── Criar sessão (window inicial é a primeira CLI ativa) ──
+# ── Criar workspace e abas (a primeira aba é a primeira CLI ativa) ──
+CREATED=$(herdr --session "$PROJECT" workspace create --cwd "$DIR" --label "$PROJECT")
+WORKSPACE_ID=$(jq -er '.result.workspace.workspace_id' <<< "$CREATED")
+FIRST_TAB=$(jq -er '.result.tab.tab_id' <<< "$CREATED")
+ROOT_PANE=$(jq -er '.result.root_pane.pane_id' <<< "$CREATED")
 FIRST_WINDOW_CREATED=false
 
 open_window() {
     local name="$1"
     local cmd="$2"
+    local pane created
     if ! $FIRST_WINDOW_CREATED; then
-        tmux new-session -d -s "$PROJECT" -n "$name" -c "$DIR"
+        herdr --session "$PROJECT" tab rename "$FIRST_TAB" "$name" >/dev/null
+        pane="$ROOT_PANE"
         FIRST_WINDOW_CREATED=true
     else
-        tmux new-window -t "$PROJECT" -n "$name" -c "$DIR"
+        created=$(herdr --session "$PROJECT" tab create --workspace "$WORKSPACE_ID" --cwd "$DIR" --label "$name")
+        pane=$(jq -er '.result.root_pane.pane_id' <<< "$created")
     fi
-    tmux send-keys -t "$PROJECT" "$cmd" C-m
+    herdr --session "$PROJECT" pane run "$pane" "$cmd" >/dev/null
 }
 
 $CLAUDE   && open_window "claude"   "$CLAUDE_CMD"
@@ -194,32 +256,13 @@ $AIDER   && open_window "aider"    "$AIDER_CMD"
 
 # ── Shell livre (sempre) ──
 if ! $FIRST_WINDOW_CREATED; then
-    tmux new-session -d -s "$PROJECT" -n "shell" -c "$DIR"
+    herdr --session "$PROJECT" tab rename "$FIRST_TAB" shell >/dev/null
 else
-    tmux new-window -t "$PROJECT" -n "shell" -c "$DIR"
+    herdr --session "$PROJECT" tab create --workspace "$WORKSPACE_ID" --cwd "$DIR" --label shell >/dev/null
 fi
 
-# ── Focar na primeira window ──
-tmux select-window -t "$PROJECT":1
-
-# ── Serviços opcionais (clipboard + browser) ──
-TUNNEL_PORTS=""
-
-if $CLIPBOARD; then
-    CLIP_PORT=3456
-    if ! ss -tlnp 2>/dev/null | grep -q ":$CLIP_PORT "; then
-        node "$HOME/bin/ai-clipboard" "$CLIP_PORT" &
-        disown
-        sleep 1
-    fi
-    TUNNEL_PORTS="$CLIP_PORT"
-fi
-
-if $BROWSER; then
-    CDP_PORT=9222
-    "$HOME/bin/ai-browser" "$CDP_PORT"
-    TUNNEL_PORTS="${TUNNEL_PORTS:+$TUNNEL_PORTS }$CDP_PORT"
-fi
+# ── Focar na primeira aba ──
+herdr --session "$PROJECT" tab focus "$FIRST_TAB" >/dev/null
 
 # ── Info ──
 AGENTS=""
@@ -247,4 +290,4 @@ if [ -n "$TUNNEL_PORTS" ]; then
 fi
 
 # ── Attach ──
-tmux attach -t "$PROJECT"
+exec herdr --session "$PROJECT"

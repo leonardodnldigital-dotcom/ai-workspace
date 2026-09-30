@@ -6,7 +6,7 @@ version: "3.7"
 
 services:
   aiworkspace:
-    image: ghcr.io/ffmenezes/ai-workspace:latest
+    image: ghcr.io/leonardodnldigital-dotcom/ai-workspace:latest
     hostname: "{{.Service.Name}}.{{.Task.Slot}}"
 
     stdin_open: true
@@ -61,8 +61,8 @@ services:
           - node.role == manager
       resources:
         limits:
-          cpus: "2"
-          memory: 3072M
+          cpus: "8"
+          memory: 32G
         reservations:
           cpus: "0.5"
           memory: 512M
