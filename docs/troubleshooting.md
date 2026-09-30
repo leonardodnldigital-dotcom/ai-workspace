@@ -66,7 +66,7 @@ Os aliases do host (`ai-enter`, `ai-dev`, etc.) já incluem `-u dev` — use-os 
 
 ```bash
 # Reinstalar aliases (do host):
-curl -fsSL https://raw.githubusercontent.com/ffmenezes/ai-workspace/main/setup-host-aliases.sh | bash
+curl -fsSL https://raw.githubusercontent.com/leonardodnldigital-dotcom/ai-workspace/main/setup-host-aliases.sh | bash
 source ~/.bashrc
 ```
 

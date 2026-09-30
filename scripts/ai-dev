@@ -183,7 +183,7 @@ fi
 SESSION_STATE=$(herdr --session "$PROJECT" workspace list 2>/dev/null || true)
 [ -n "$SESSION_STATE" ] || SESSION_STATE='{}'
 if ! jq -e '.result.workspaces' <<< "$SESSION_STATE" >/dev/null 2>&1; then
-    herdr --session "$PROJECT" server >/dev/null 2>&1 &
+    /usr/bin/setsid herdr --session "$PROJECT" server </dev/null >/dev/null 2>&1 &
     for _ in 1 2 3 4 5 6 7 8 9 10; do
         herdr --session "$PROJECT" workspace list >/dev/null 2>&1 && break
         sleep 0.2

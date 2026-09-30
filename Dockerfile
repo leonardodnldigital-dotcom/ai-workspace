@@ -38,7 +38,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && ln -sf /usr/bin/fdfind /usr/local/bin/fd \
     # sshd config: pubkey only, porta 2222, tunnel habilitado
     && mkdir -p /run/sshd \
-    && printf 'Port 2222\nPermitRootLogin no\nPasswordAuthentication no\nPubkeyAuthentication yes\nAllowUsers dev\nX11Forwarding no\nAllowTcpForwarding yes\nGatewayPorts no\nPrintMotd no\n' > /etc/ssh/sshd_config.d/workspace.conf
+    && printf 'Port 2222\nPermitRootLogin no\nPasswordAuthentication no\nPubkeyAuthentication yes\nAllowUsers dev\nX11Forwarding no\nAllowTcpForwarding yes\nGatewayPorts no\nPrintMotd no\nSetEnv PATH=/home/dev/bin:/home/dev/.local/bin:/usr/local/bin:/usr/local/go/bin:/usr/bin:/bin\n' > /etc/ssh/sshd_config.d/workspace.conf
 
 # Herdr: release fixa e verificada (x86_64 / aarch64).
 ARG HERDR_VERSION=0.9.1

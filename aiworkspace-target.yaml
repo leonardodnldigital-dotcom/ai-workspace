@@ -22,7 +22,7 @@ services:
     healthcheck:
       test:
         - CMD
-        - bash
+        - /bin/bash
         - -ec
         - 'test -s /run/sshd.pid && read -r workspace_sshd_pid < /run/sshd.pid && kill -0 "$$workspace_sshd_pid" && : >/dev/tcp/127.0.0.1/2222'
       interval: 30s

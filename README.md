@@ -4,20 +4,21 @@ Setup containerizado de **8 AI coding agents** no Docker Swarm, com persistênci
 
 **Agents**: Claude Code, Gemini CLI, Qwen Code, Cursor CLI, OpenCode CLI, Codex CLI, Cline CLI, Aider
 
-## Destino OS Agenda em preparação
+## Destino OS Agenda
 
 Em 30/09/2026, o destino é `root@207.180.3.209` (`srv-2j3lui`), em Swarm
 independente das origens. A origem `5.189.165.36` permanece disponível até o
 usuário validar o acesso pelo PC e pela IDE. Esta seção e
 [`aiworkspace-target.yaml`](aiworkspace-target.yaml) definem o destino; o guia
 genérico abaixo descreve a instalação com volumes separados e rede compartilhada.
+O serviço Swarm está ativo e `healthy`, com home persistente restaurado.
 
 | Contrato | Destino |
 |---|---|
 | Imagem local | `aiworkspace-herdr:migration-20260930` |
-| Persistência | Volume externo `aiworkspace_home` em todo `/home/dev` |
+| Persistência | Volume externo `aiworkspace_home` em todo `/home/dev`, UID/GID `1001:1001` |
 | Multiplexador | Herdr `0.9.1`, exclusivo |
-| Limites | 8 CPUs e `32G` de RAM |
+| Limites | 8 CPUs e `32G` de RAM (32 GiB) |
 | Reservas | 1 CPU e `2G` de RAM |
 | Rede | Overlay própria do workspace |
 | SSH do container | Porta 2222, acessível pelo loopback do host |
@@ -27,7 +28,11 @@ as versões das CLIs. O volume completo conserva projetos, configurações,
 histórico, autenticação e chaves SSH, inclusive arquivos fora dos antigos mounts.
 Preservar UID/GID e permissões; backups do home contêm credenciais e devem
 permanecer restritos, fora do repositório. Processos e PTYs da origem não migram
-com o volume; as sessões de agentes serão iniciadas no Herdr do destino.
+com o volume. O layout dos dois workspaces Herdr foi restaurado: `osagenda`
+com três abas/cinco panes e `buga` com duas abas/três panes. Os três panes Codex
+`wC:p6`, `wC:pA` e `wD:p5` foram conferidos com os mesmos IDs de retomada da
+origem, sem acrescentar prompt. A metadata `agent_session` (`kind`/`id`) foi
+registrada para retomada após reiniciar o Herdr.
 
 No destino confirmado, o deploy usa a imagem já presente no nó, com o home
 restaurado e a label `aiworkspace=true`:
@@ -52,11 +57,20 @@ externamente. O sshd do host permite ao root somente forwarding local para
 A chave operacional `AI_WORKSPACE_DESTINATION_SSH_PRIVATE_KEY` tem fonte no
 Infisical `prod`, `/operator/local`, e consumidor `/root/.ssh/id_aiworkspace`
 no destino, com modo `0600`. O PC utiliza suas próprias chaves autorizadas.
+A chave operacional foi testada no consumidor real. O acesso externo pelo root
+na porta 22, seguido de ProxyJump para `dev@127.0.0.1:2222`, passou; a porta
+2222 pública permaneceu bloqueada. As chaves de host e os fingerprints SSH
+foram preservados.
 
 ```sh
-ssh -J root@207.180.3.209 -p 2222 \
-  -o HostKeyAlias=aiworkspace-destino dev@127.0.0.1
+ssh -t -J root@207.180.3.209 -p 2222 \
+  -o HostKeyAlias=aiworkspace-destino dev@127.0.0.1 'ai-dev osagenda'
 ```
+
+O PATH da conexão SSH foi configurado para localizar `ai-dev`. O clipboard está
+habilitado nos defaults restaurados e inicia antes de anexar ao Herdr.
+O launcher inicia o servidor com `setsid`, em uma sessão independente do SSH;
+fechar o terminal preserva o servidor e suas abas.
 
 Conferir o fingerprint do sshd restaurado antes de aceitar a host key. Para
 VS Code Remote SSH, usar um alias distinto da origem em `~/.ssh/config` do PC:
@@ -83,8 +97,15 @@ atalho atual até conferir esse script e validar o novo acesso com o usuário.
 
 ### Cópia do home e SQLite
 
-A cópia está em andamento; os seis bancos SQLite do Codex usam online backup.
-Não há ainda confirmação de restauração ou validação desses bancos no destino.
+O home foi restaurado com UID/GID `1001:1001`. Os online backups dos seis bancos
+SQLite do Codex passaram `PRAGMA quick_check` na origem e no destino, com
+resultado `ok`. Os recibos root-only estão em
+`/opt/migration-vps/aiworkspace/codex-online-sqlite-*.json`. O procedimento para
+nova cópia ou delta final permanece abaixo. Os snapshots online finais de
+`history` e `state` também passaram `quick_check`. Os três JSONL associados às
+sessões foram restaurados, totalizando 37,44 MB, com UID/GID `1001:1001` e modo
+`0600`. O mapa e a prova de retomada estão no recibo protegido
+`/opt/migration-vps/aiworkspace/codex-pane-map-muocz3nn-r5pqbud0.json`.
 
 1. Inventariar todo `/home/dev` e copiar preservando permissões e arquivos ocultos.
 2. Para cada SQLite em uso, gerar um backup consistente pela API
@@ -98,6 +119,52 @@ Não há ainda confirmação de restauração ou validação desses bancos no de
    do destino durante o delta final do home e dos backups SQLite. Manter a origem
    e seu backup até a confirmação do usuário, evitando alterações concorrentes
    no mesmo projeto.
+
+### Evidências e pendências de acesso
+
+Os HEADs dos repositórios coincidem entre origem e destino, e
+`git fsck --connectivity-only` passou nos dois lados:
+
+| Projeto | HEAD conferido |
+|---|---|
+| `osagenda` | `1d324cf1a9dc88f97637b5edd835ec694f82a10f` |
+| `buga` | `1f092697d32738dea330d3495c37bcd3d39c3080` |
+
+Claude retornou `loggedIn: true`; a verificação de login do Codex terminou com
+exit code `0`. As fontes canônicas dos arquivos de credenciais são os segredos
+`AIWORKSPACE_CODEX_MCP_CREDENTIALS_JSON` e `AIWORKSPACE_CLAUDE_CREDENTIALS_JSON`
+no Infisical `prod`, `/operator/local`. Seus consumidores são
+`/home/dev/.codex/.credentials.json` e `/home/dev/.claude/.credentials.json`,
+ambos `0600`; o conteúdo JSON foi comparado por hash em memória com a fonte,
+sem registrar valores.
+
+Os 19 blocos de configuração MCP coincidem com a origem. Foram testados os
+transportes e catálogos de ferramentas:
+
+| MCP | Ferramentas no catálogo |
+|---|---|
+| Apps | 98 |
+| Context7 principal / fallback | 2 / 2 |
+| grep.app | 1 |
+| Playwright | 25 |
+| Sentry | 9 |
+| Vercel | 243 |
+| Hostinger | 3 |
+
+As autorizações reais abaixo foram adiadas pelo usuário até testar o terminal
+e ainda precisam de sua intervenção:
+
+- Stripe e TikTok: `invalid_grant`, exigindo nova autenticação.
+- Supabase Buga: HTTP `422`, com `client_secret` ausente no registro antigo.
+- Supabase OS Agenda: registro OAuth ausente; a autenticação no Claude falhou.
+- Mercado Pago: autenticação exigida.
+
+Transporte e catálogo conferidos não comprovam essas autorizações. A imagem
+operacional final foi testada e o usuário já pode testar o SSH direto. O primeiro
+acesso pelo PC, a IDE e o script original `idev/osagenda` permanecem pendentes;
+manter a origem até essa confirmação. A referência-base publicada do fork é o
+commit `33d13b21a1b62ba046fa56a78bbe21a727391c53`. Este código inclui as correções
+finais de PATH, healthcheck, SSH Go e persistência do servidor após desconectar.
 
 ---
 
@@ -304,12 +371,12 @@ done
 ### Opcao A — Pull do GHCR (recomendado)
 
 ```bash
-docker pull ghcr.io/ffmenezes/ai-workspace:latest
+docker pull ghcr.io/leonardodnldigital-dotcom/ai-workspace:latest
 ```
 
 > Se a imagem e privada:
 > ```bash
-> echo "$GITHUB_TOKEN" | docker login ghcr.io -u ffmenezes --password-stdin
+> echo "$GITHUB_TOKEN" | docker login ghcr.io -u leonardodnldigital-dotcom --password-stdin
 > ```
 
 ### Opcao B — Build local
@@ -932,16 +999,16 @@ git push origin main --tags
 **Pinar no `aiworkspace.yaml`**:
 
 ```yaml
-image: ghcr.io/ffmenezes/ai-workspace:0.3       # patches automaticos
-image: ghcr.io/ffmenezes/ai-workspace:0.3.0     # pin exato
-image: ghcr.io/ffmenezes/ai-workspace:latest     # sempre o ultimo
+image: ghcr.io/leonardodnldigital-dotcom/ai-workspace:0.3       # patches automaticos
+image: ghcr.io/leonardodnldigital-dotcom/ai-workspace:0.3.0     # pin exato
+image: ghcr.io/leonardodnldigital-dotcom/ai-workspace:latest     # sempre o ultimo
 ```
 
 **Atualizar pra versao especifica**:
 
 ```bash
-ai-update ghcr.io/ffmenezes/ai-workspace:0.3.0
-ai-update ghcr.io/ffmenezes/ai-workspace:sha-abc1234   # rollback
+ai-update ghcr.io/leonardodnldigital-dotcom/ai-workspace:0.3.0
+ai-update ghcr.io/leonardodnldigital-dotcom/ai-workspace:sha-abc1234   # rollback
 ```
 
 ---

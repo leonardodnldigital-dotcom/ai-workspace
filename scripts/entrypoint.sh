@@ -6,6 +6,7 @@
 # Substitui o CMD inline do Dockerfile.
 # ══════════════════════════════════════════════════════════════
 set -e
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 # Seed a new whole-home volume and update only the scripts owned by this image.
 # Existing shell settings, credentials and user scripts remain in the volume.
@@ -97,7 +98,7 @@ chown dev:dev "$LOG"
 # ── 5. Dropa pra dev → Herdr + tail ──
 # A PID from the previous container cannot identify a process in this boot.
 rm -f /home/dev/.ai-browser.pid
-exec gosu dev bash -ec '
+exec gosu dev env PATH="/home/dev/bin:/home/dev/.local/bin:/usr/local/go/bin:$PATH" bash -ec '
     herdr --session main server >> /home/dev/.ai-workspace.log 2>&1 &
     for _ in 1 2 3 4 5 6 7 8 9 10; do
         herdr --session main workspace list >/dev/null 2>&1 && break
