@@ -35,6 +35,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Utilitários
     less nano htop tree \
     && rm -rf /var/lib/apt/lists/* \
+    # Generate host keys at first boot, never in a published image layer.
+    && rm -f /etc/ssh/ssh_host_* \
     && ln -sf /usr/bin/fdfind /usr/local/bin/fd \
     # sshd config: pubkey only, porta 2222, tunnel habilitado
     && mkdir -p /run/sshd \
@@ -276,7 +278,10 @@ ENV STARSHIP_CONFIG="/home/dev/.config/starship.toml"
 # Lógica extraída para scripts/entrypoint.sh pra manutenção.
 USER root
 COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh \
+    && for host_key in /etc/ssh/ssh_host_*_key; do \
+        test ! -f "$host_key" || { echo 'SSH host keys must be generated at boot' >&2; exit 1; }; \
+    done
 
 EXPOSE 2222
 
